@@ -19,6 +19,6 @@ my $recv = new_ok(
     'pg_recvlogical'
 );
 
-is $recv->_dsn, 'dbi:Pg:dbname=test;host=localhost;port=15432;replication=database';
+is $recv->_dsn, 'dbi:Pg:client_encoding=sql_ascii;dbname=test;host=localhost;port=15432;replication=database';
 
 done_testing;
