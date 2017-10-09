@@ -6,6 +6,7 @@ use Moo;
 use DBI;
 use DBD::Pg 3.7.0 ':async';
 use AnyEvent;
+use AnyEvent::Util 'guard';
 use Promises backend => ['AnyEvent'], qw(deferred);
 use Types::Standard ':all';
 use Try::Tiny;
@@ -63,7 +64,6 @@ has reconnect      => (is => 'ro', isa => Bool,    default => 1);
 has heartbeat      => (is => 'ro', isa => Int,     default => 10);
 has plugin         => (is => 'ro', isa => Str,     default => 'test_decoding');
 has options        => (is => 'ro', isa => HashRef, default => sub { {} });
-has autoflush      => (is => 'ro', isa => Bool,    default => 1);
 has startpos     => (is => 'rwp', isa => $LSN, default => 0, coerce  => 1);
 has received_lsn => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef);
 has flushed_lsn  => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef);
@@ -222,17 +222,11 @@ sub _read_copydata {
 
     $self->_set_received_lsn($startlsn);
 
-    if ($self->autoflush) {
-        $self->on_message->($record);
+    my $guard = guard {
         $self->_set_flushed_lsn($startlsn) if $startlsn > $self->flushed_lsn;
-    } else {
-        $self->on_message->(
-            $record,
-            sub {
-                $self->_set_flushed_lsn($startlsn) if $startlsn > $self->flushed_lsn;
-            }
-        );
-    }
+    };
+
+    $self->on_message->($record, $guard);
 
     # do it again until $n == 0
     my $w; $w = AE::timer 0, 0, sub { undef $w; $self->_read_copydata };
