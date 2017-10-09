@@ -34,13 +34,12 @@ my $recv = new_ok(
         options        => { 'skip-empty-xacts' => 1 },
         do_create_slot => 1,
         slot_exists_ok => 1,
-        on_message     => sub { pass "got message: @_"; $end_cv->send if $_[0] =~ /payload\[text\]:'qwerty'/ },
+        heartbeat      => 1,
+        on_message     => sub { pass "got message: $_[0]"; $end_cv->send(1) if $_[0] =~ /payload\[text\]:'qwerty'/ },
         on_error => sub { fail $_[0]; $end_cv->croak(@_) },
     ],
     'pg_recvlogical'
 );
-
-$end_cv->cb(sub { $recv->stop });
 
 ok $recv->dbh, 'connected';
 
@@ -57,6 +56,12 @@ $recv->start->done(
     }
 );
 
-$end_cv->recv;
+# let some heartbeats go by
+my $cv = AE::cv;
+$cv->begin; my $wt = AE::timer 3, 0, sub { $cv->end };
+$cv->recv;
+
+ok $end_cv->recv, 'got a message';
+$recv->stop;
 
 done_testing;
