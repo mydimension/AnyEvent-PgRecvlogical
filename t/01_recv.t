@@ -11,6 +11,13 @@ use Promises backend => ['AnyEvent'], qw(deferred);
 
 use ok 'AnyEvent::PgRecvlogical';
 
+sub ae_sleep {
+    my $t = shift || 0;
+    my $cv = AE::cv;
+    $cv->begin; my $wt = AE::timer $t, 0, sub { $cv->end };
+    $cv->recv;
+}
+
 my $t_dir = File::Spec->rel2abs(dirname(__FILE__));
 my $pg_hba_conf = File::Spec->join($t_dir, 'pg_hba.conf');
 
@@ -20,7 +27,17 @@ my $pg = eval {
 }
   or plan skip_all => "cannot create test postgres database: $Test::PostgreSQL::errstr";
 
+my @expected = (
+    'BEGIN',
+    "table public.test_tbl: INSERT: id[integer]:1 payload[text]:'qwerty'",
+    'COMMIT',
+    'BEGIN',
+    "table public.test_tbl: INSERT: id[integer]:2 payload[text]:'asdfgh'",
+    'COMMIT',
+);
+
 my $control = DBI->connect($pg->dsn, 'postgres');
+$control->do('create table test_tbl (id int primary key, payload text)');
 
 my $end_cv = AE::cv;
 
@@ -31,11 +48,14 @@ my $recv = new_ok(
         port           => $pg->port,
         username       => 'postgres',
         slot           => 'test',
-        options        => { 'skip-empty-xacts' => 1 },
+        options        => { 'skip-empty-xacts' => 1, 'include-xids' => 0 },
         do_create_slot => 1,
         slot_exists_ok => 1,
         heartbeat      => 1,
-        on_message     => sub { pass "got message: $_[0]"; $end_cv->send(1) if $_[0] =~ /payload\[text\]:'qwerty'/ },
+        on_message     => sub { 
+            is $_[0], shift @expected, $_[0];
+            $end_cv->send(1) unless @expected;
+        },
         on_error => sub { fail $_[0]; $end_cv->croak(@_) },
     ],
     'pg_recvlogical'
@@ -43,25 +63,20 @@ my $recv = new_ok(
 
 ok $recv->dbh, 'connected';
 
-$recv->start->done(
-    sub {
-        pass 'replication started';
+$recv->start->done( sub { pass 'replication started' }, sub { fail 'replication started'; diag @_ });
 
-        $control->do('create table test_tbl (id int primary key, payload text)');
-        $control->do('insert into test_tbl (id, payload) values (?, ?)', undef, 1, 'qwerty');
-    },
-    sub {
-        fail 'replication started';
-        diag @_;
-    }
-);
+ae_sleep(1);
+
+$control->do('insert into test_tbl (id, payload) values (?, ?)', undef, 1, 'qwerty');
+
+ae_sleep(1);
+
+$control->do('insert into test_tbl (id, payload) values (?, ?)', undef, 2, 'asdfgh');
 
 # let some heartbeats go by
-my $cv = AE::cv;
-$cv->begin; my $wt = AE::timer 3, 0, sub { $cv->end };
-$cv->recv;
+ae_sleep(3);
 
-ok $end_cv->recv, 'got a message';
+ok $end_cv->recv, 'got all messages';
 $recv->stop;
 
 done_testing;
