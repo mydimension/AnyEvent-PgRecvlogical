@@ -13,7 +13,7 @@ use Try::Tiny;
 use Carp 'croak';
 
 use constant {
-    AWAIT_INTERVAL     => 1,
+    AWAIT_INTERVAL    => 1,
     USECS             => 1_000_000,
     PG_MIN_VERSION    => 9_04_00,
     PG_MIN_NOEXPORT   => 10_00_00,
@@ -53,20 +53,23 @@ my $LSN = Int->plus_coercions(
 has dbname   => (is => 'ro', isa => Str, required  => 1);
 has host     => (is => 'ro', isa => Str, predicate => 1);
 has port     => (is => 'ro', isa => Int, predicate => 1);
-has username => (is => 'ro', isa => Str, predicate => 1);
-has password => (is => 'ro', isa => Str, predicate => 1);
+has username => (is => 'ro', isa => Str, default => q{});
+has password => (is => 'ro', isa => Str, default => q{});
 has slot     => (is => 'ro', isa => Str, required  => 1);
 
 has dbh => (is => 'lazy', isa => $DBH, clearer => 1, init_arg => undef);
-has do_create_slot => (is => 'ro', isa => Bool,    default => 0);
-has slot_exists_ok => (is => 'ro', isa => Bool,    default => 0);
-has reconnect      => (is => 'ro', isa => Bool,    default => 1);
-has heartbeat      => (is => 'ro', isa => Int,     default => 10);
-has plugin         => (is => 'ro', isa => Str,     default => 'test_decoding');
-has options        => (is => 'ro', isa => HashRef, default => sub { {} });
+has do_create_slot     => (is => 'ro', isa => Bool, default   => 0);
+has slot_exists_ok     => (is => 'ro', isa => Bool, default   => 0);
+has reconnect          => (is => 'ro', isa => Bool, default   => 1);
+has reconnect_delay    => (is => 'ro', isa => Int,  default   => 5);
+has reconnect_limit    => (is => 'ro', isa => Int,  predicate => 1);
+has _reconnect_counter => (is => 'rw', isa => Int,  default   => 0);
+has heartbeat          => (is => 'ro', isa => Int,  default   => 10);
+has plugin             => (is => 'ro', isa => Str,  default   => 'test_decoding');
+has options => (is => 'ro', isa => HashRef, default => sub { {} });
 has startpos     => (is => 'rwp', isa => $LSN, default => 0, coerce  => 1);
-has received_lsn => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef);
-has flushed_lsn  => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef);
+has received_lsn => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef, lazy => 1);
+has flushed_lsn  => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef, lazy => 1);
 
 has on_message => (is => 'ro', isa => CodeRef, required => 1);
 has on_error => (is => 'ro', isa => CodeRef, default => sub { \&croak });
@@ -92,8 +95,9 @@ sub _build_dbh {
     my $self = shift;
     return DBI->connect(
         $self->_dsn,
-        ($self->has_username ? $self->username : ''),
-        ($self->has_password ? $self->password : ''),
+        $self->username,
+        $self->password,
+        { PrintError => 0 },
     );
 }
 
@@ -186,17 +190,23 @@ sub start_replication {
 sub _read_copydata {
     my $self = shift;
 
-    my $n = $self->dbh->pg_getcopydata_async(my $msg);
+    my ($n, $msg);
+    try {
+        $n = $self->dbh->pg_getcopydata_async($msg);
+    };
 
-    return if $n == 0;    # nothing waiting
+    return unless defined $n;    # exception thrown, going to reconnect;
+    return if $n == 0;           # nothing waiting
 
     if ($n == -1) {
         AE::postpone { $self->_handle_disconnect };
         return;
     }
 
+    # uncoverable branch true
     if ($n == -2) {
         # error reading
+        # uncoverable statement
         $self->on_error->('could not read COPY data: ' . $self->dbh->errstr);
     }
 
@@ -207,14 +217,18 @@ sub _read_copydata {
         my (undef, $lsnpos, $ts, $reply) = unpack PRIMARY_HEARTBEAT, $msg;
 
         # only interested in the request-reply bit
+        # uncoverable branch true
         if ($reply) {
+            # uncoverable statement
             AE::postpone { $self->_heartbeat };
         }
 
         return;
     }
 
+    # uncoverable branch true
     unless ('w' eq $type) {
+        # uncoverable statement
         $self->on_error->("unrecognized streaming header: '$type'");
     }
 
@@ -247,16 +261,26 @@ sub _handle_disconnect {
 
     return unless $self->reconnect;
 
-    $self->_startpos($self->flushed_lsn);
+    if (    $self->has_reconnect_limit
+        and $self->_reconnect_counter($self->_reconnect_counter + 1) > $self->reconnect_limit) {
+        return;
+    }
+
+    $self->_set_startpos($self->flushed_lsn);
     $self->clear_received_lsn;
     $self->clear_flushed_lsn;
 
-    $self->_post_init($self->start_replication);
+    my $w; $w = AE::timer $self->reconnect_delay, 0, sub {
+        undef $w;
+        $self->_post_init(deferred { $self->start_replication });
+    };
 }
 
 sub _heartbeat {
     my ($self, $req_reply) = @_;
     $req_reply = !!$req_reply || 0;
+
+    $self->_reconnect_counter(0);
 
     my $status = pack STANDBY_HEARTBEAT, 'r',     # receiver status update
       $self->received_lsn,                        # last WAL received

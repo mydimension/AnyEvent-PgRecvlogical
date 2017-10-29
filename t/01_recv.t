@@ -52,6 +52,7 @@ my $recv = new_ok(
         do_create_slot => 1,
         slot_exists_ok => 1,
         heartbeat      => 1,
+        reconnect_delay => 1,
         on_message     => sub { 
             is $_[0], shift @expected, $_[0];
             $end_cv->send(1) unless @expected;
@@ -65,11 +66,15 @@ ok $recv->dbh, 'connected';
 
 $recv->start->done( sub { pass 'replication started' }, sub { fail 'replication started'; diag @_ });
 
-ae_sleep(1);
+ae_sleep(2);
 
 $control->do('insert into test_tbl (id, payload) values (?, ?)', undef, 1, 'qwerty');
 
-ae_sleep(1);
+ae_sleep(2);
+
+$control->do('select pg_terminate_backend(?)', undef, $recv->dbh->{pg_pid});
+
+ae_sleep(2);
 
 $control->do('insert into test_tbl (id, payload) values (?, ?)', undef, 2, 'asdfgh');
 
