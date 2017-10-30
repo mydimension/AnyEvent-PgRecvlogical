@@ -286,7 +286,7 @@ sub _heartbeat {
       $self->received_lsn,                        # last WAL received
       $self->flushed_lsn,                         # last WAL flushed
       0,                                          # last WAL applied
-      int((AE::now - PG_EPOCH_DELTA) * USECS),    # ms since 2001-01-01
+      int((AE::now - PG_EPOCH_DELTA) * USECS),    # ms since 2000-01-01
       $req_reply;                                 # request heartbeat
 
     $self->dbh->pg_putcopydata($status);
