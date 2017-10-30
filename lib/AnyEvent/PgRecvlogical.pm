@@ -150,7 +150,7 @@ sub create_slot {
             'CREATE_REPLICATION_SLOT %s LOGICAL %s%s',
             $dbh->quote_identifier($self->slot),
             $dbh->quote_identifier($self->plugin),
-            ($dbh->{pg_server_version} >= PG_MIN_NOEXPORT ? ' NOEXPORT_SNAPSHOT' : '')
+            ($dbh->{pg_server_version} >= PG_MIN_NOEXPORT ? ' NOEXPORT_SNAPSHOT' : '')    # uncoverable branch true
         ),
         { pg_async => PG_ASYNC }
     );
@@ -168,10 +168,10 @@ sub _option_string {
     my @opts;
     while (my ($k, $v) = each %{ $self->options }) {
         push @opts, $self->dbh->quote_identifier($k);
-        defined $v and $opts[-1] .= sprintf ' %s', $self->dbh->quote($v);
+        defined $v and $opts[-1] .= sprintf ' %s', $self->dbh->quote($v);    # uncoverable branch false
     }
 
-    return @opts ? sprintf('(%s)', join q{, }, @opts) : q{};
+    return @opts ? sprintf('(%s)', join q{, }, @opts) : q{};    # uncoverable branch false
 }
 
 sub start_replication {
@@ -191,12 +191,21 @@ sub _read_copydata {
     my $self = shift;
 
     my ($n, $msg);
-    try {
+    my $ok = try {
         $n = $self->dbh->pg_getcopydata_async($msg);
+        1;
+    }
+    catch {
+        # uncoverable statement count:2
+        AE::postpone { $self->_handle_disconnect };
+        0;
     };
 
-    return unless defined $n;    # exception thrown, going to reconnect;
-    return if $n == 0;           # nothing waiting
+    # exception thrown, going to reconnect
+    return unless $ok;    # uncoverable branch true
+
+    # nothing waiting
+    return if $n == 0;
 
     if ($n == -1) {
         AE::postpone { $self->_handle_disconnect };
@@ -222,6 +231,9 @@ sub _read_copydata {
             # uncoverable statement
             AE::postpone { $self->_heartbeat };
         }
+
+        # an inbound heartbeat is proof enough of successful reconnect
+        $self->_reconnect_counter(0) if $self->_reconnect_counter;
 
         return;
     }
@@ -263,6 +275,7 @@ sub _handle_disconnect {
 
     if (    $self->has_reconnect_limit
         and $self->_reconnect_counter($self->_reconnect_counter + 1) > $self->reconnect_limit) {
+        $self->on_error->('reconnect limit reached: ' . $self->reconnect_limit);
         return;
     }
 
@@ -278,9 +291,7 @@ sub _handle_disconnect {
 
 sub _heartbeat {
     my ($self, $req_reply) = @_;
-    $req_reply = !!$req_reply || 0;
-
-    $self->_reconnect_counter(0);
+    $req_reply = !!$req_reply || 0;    #uncoverable condition right
 
     my $status = pack STANDBY_HEARTBEAT, 'r',     # receiver status update
       $self->received_lsn,                        # last WAL received
@@ -298,7 +309,7 @@ sub _async_await {
     my $d = deferred;
 
     # no async operation in progress
-    return $d->reject if $dbh->{pg_async_status} == 0;
+    return $d->reject if $dbh->{pg_async_status} == 0;    # uncoverable branch true
 
     my $w; $w = AE::timer 0, AWAIT_INTERVAL, sub {
         return unless $dbh->pg_ready;
