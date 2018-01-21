@@ -2,6 +2,39 @@ package AnyEvent::PgRecvlogical;
 
 # ABSTRACT: perl port of pg_recvlogical
 
+=pod
+
+=head1 NAME
+
+AnyEvent::PgRecvlogical - perl port of pg_recvlogical
+
+=head1 SYNOPSIS
+
+    use AnyEvent::PgRecvlogical;
+
+    my $recv = AnyEvent::PgRecvlogical->new(
+        dbname     => 'mydb',
+        slot       => 'myreplslot',
+        on_message => sub {
+            my ($record, $guard) = @_;
+
+            process($record);
+
+            undef $guard; # declare done with $record
+        }
+    );
+
+    $recv->start;
+
+=head1 DESCRIPTION
+
+C<AnyEvent::PgRecvlogical> provides perl bindings of similar functionality to that of
+L<pg_recvlogical|https://www.postgresql.org/docs/current/static/app-pgrecvlogical.html>.
+The reasoning being that C<pg_recvlogical> does afford the consuming process the opportunity to emit feedback to
+PostgreSQL. This results is potentially being sent more data than you can handle in a timely fashion.
+
+=cut
+
 use Moo;
 use DBI;
 use DBD::Pg 3.7.0 ':async';
@@ -50,6 +83,205 @@ my $LSN = Int->plus_coercions(
     }
 );
 
+=head1 ATTRIBUTES
+
+=over
+
+=item C<dbname>
+
+=over
+
+=item L<Str|Types::Standard/Str>, Required
+
+=back
+
+Database name to connect to.
+
+=item C<slot>
+
+=over
+
+=item L<Str|Types::Standard/Str>, Required
+
+=back
+
+Name of the replication slot to use (and/or create, see L</do_create_slot> and L</slot_exists_ok>)
+
+=item C<host>
+
+=over
+
+=item L<Str|Types::Standard/Str>
+
+=back
+
+=item C<port>
+
+=over
+
+=item L<Int|Types::Standard/SInt>
+
+=back
+
+=item C<username>
+
+=over
+
+=item L<Str|Types::Standard/Str>
+
+=back
+
+=item C<password>
+
+=over
+
+=item L<Str|Types::Standard/Str>
+
+=back
+
+Standard PostgreSQL connection parameters, see L<DBD::Pg/connect>.
+
+=item C<do_create_slot>
+
+=over
+
+=item L<Bool|Types::Standard/Bool>, Default: C<0>
+
+=back
+
+If true, the L</slot> will be be created upon connection. Otherwise, it's assumed it already exists. If it does not,
+PostgreSQL will raise an exception.
+
+=item C<slot_exists_ok>
+
+=over
+
+=item L<Bool|Types::Standard/Bool>, Default: C<0>
+
+=back
+
+If true, and if L</do_create_slot> is also true, then no exception will be raised if the L</slot> already exists.
+Otherwise, one will be raised.
+
+=item C<reconnect>
+
+=over
+
+=item L<Bool|Types::Standard/Bool>, Default: C<1>
+
+=back
+
+If true, will attempt to reconnect to the server and resume logical replication in the event the connection fails.
+Otherwise, the connection will gracefully be allowed to close.
+
+=item C<reconnect_delay>
+
+=over
+
+=item L<Int|Types::Standard/Int>, Default: C<5>
+
+=back
+
+Time, in seconds, to wait before reconnecting.
+
+=item C<reconnect_limit>
+
+=over
+
+=item L<Int|Types::Standard/Int>, Default: C<1>
+
+=back
+
+Number of times to attempt reconnecting. If this limit is exceded, an exception will be thrown.
+
+=item C<heartbeat>
+
+=over
+
+=item L<Int|Types::Standard/Int>, Default: C<10>
+
+=back
+
+Interval, in seconds, to report our progress to the PostgreSQL server.
+
+=item C<plugin>
+
+=over
+
+=item L<Str|Types::Standard/Str>, Default: L<test_decoding|https://www.postgresql.org/docs/current/static/test-decoding.html>
+
+=back
+
+The server-sider plugin used to decode the WAL file before being sent to this connection. Only required when
+L</create_slot> is true.
+
+=item C<options>
+
+=over
+
+=item L<HashRef|Types::Standard/HashRef>, Default: C<{}>
+
+=back
+
+Key-value pairs sent to the server-side L</plugin>. Keys with a value of C<undef> are sent as the keyword only.
+
+=item C<startpos>
+
+=over
+
+=item L<LSN|https://www.postgresql.org/docs/current/static/datatype-pg-lsn.html>, Default: C<0/0>
+
+=back
+
+Start replication from the given LSN. Also accepts the integer form, but that is considered advanced usage.
+
+=item C<received_lsn>
+
+=over
+
+=item L<LSN|https://www.postgresql.org/docs/current/static/datatype-pg-lsn.html>, Default: C<0/0>, Read Only
+
+=back
+
+Holds the last LSN position received from the server.
+
+=item C<flushed_lsn>
+
+=over
+
+=item L<LSN|https://www.postgresql.org/docs/current/static/datatype-pg-lsn.html>, Default: C<0/0>, Read Only
+
+=back
+
+Holds the last LSN signaled to handled by the client (see: L</on_message>)
+
+=item C<on_error>
+
+=over
+
+=item L<CodeRef|Types::Standard/CodeRef>, Default: L<croak|Carp/croak>
+
+=back
+
+Callback in the event of an error.
+
+=item C<on_message>
+
+=over
+
+=item L<CodeRef|Types::Standard/CodeRef>, Required
+
+=back
+
+Callback to receive the replication payload from the server. This is the raw output from the L</plugin>.
+
+The callback is passed the C<$payload> received and a C<$guard> object. Hang onto the C<$guard> until you have handled
+the payload. Once it is released, the server will be informed that the WAL position has been "flushed."
+
+=back
+
+=cut
+
 has dbname   => (is => 'ro', isa => Str, required  => 1);
 has host     => (is => 'ro', isa => Str, predicate => 1);
 has port     => (is => 'ro', isa => Int, predicate => 1);
@@ -76,6 +308,18 @@ has on_error => (is => 'ro', isa => CodeRef, default => sub { \&croak });
 
 has _fh_watch => (is => 'lazy', isa => Ref, clearer => 1);
 has _timer    => (is => 'lazy', isa => Ref, clearer => 1);
+
+=head1 CONSTRUCTOR
+
+All the L</"ATTRIBUTES"> above are accepted by the constructor, with a few exceptions:
+
+L</"received_lsn"> and L<"flushed_lsn"> are read-only and not accepted by the constructor.
+
+L</"dbname">, L</"slot"> and L</"on_message"> are required.
+
+Note, that logical replication will not automatically commence upon construction. One must call L</"start"> first.
+
+=cut
 
 sub _dsn {
     my $self = shift;
@@ -111,6 +355,36 @@ sub _build__timer {
     return AE::timer $self->heartbeat, $self->heartbeat, sub { $self->_heartbeat };
 }
 
+=head1 METHODS
+
+All L</"ATTRIBUTES"> are also accesible via methods. They are all read-only.
+
+=over
+
+=item start
+
+Initialize the logical replication process asyncronously and return immediately. This performs the following steps:
+
+=over
+
+=item 1. L</"identify_system">
+
+=item 2. L</"create_slot"> (if requested)
+
+=item 3. L</"start_replication">
+
+=item 4. heartbeat timer
+
+=back
+
+This method wraps the above steps for convenience. Should you desire to modify the
+L<replication startup protocol|https://www.postgresql.org/docs/current/static/protocol-replication.html> (which you
+shouldn't), the methods are described in detail below.
+
+Returns: L<Promises::Promise>
+
+=cut
+
 sub start {
     my $self = shift;
 
@@ -133,11 +407,27 @@ sub _post_init {
     );
 }
 
+=item identify_system
+
+Issues the C<IDENTIFY_SYSTEM> command to the server to put the connection in repliction mode.
+
+Returns: L<Promises::Promise>
+
+=cut
+
 sub identify_system {
     my $self = shift;
     $self->dbh->do('IDENTIFY_SYSTEM', { pg_async => PG_ASYNC });
     return _async_await($self->dbh);
 }
+
+=item create_slot
+
+Issues the appropriate C<CREATE_REPLICATION_SLOT> command to the server, if requested.
+
+Returns: L<Promises::Promise>
+
+=cut
 
 sub create_slot {
     my $self = shift;
@@ -173,6 +463,13 @@ sub _option_string {
 
     return @opts ? sprintf('(%s)', join q{, }, @opts) : q{};    # uncoverable branch false
 }
+
+=item start_replication
+
+Issues the C<START_REPLICATION SLOT> command and immediately returns. The connection will then start receiving
+logical replication payloads.
+
+=cut
 
 sub start_replication {
     my $self = shift;
@@ -260,6 +557,14 @@ sub _read_copydata {
     my $w; $w = AE::timer 0, 0, sub { undef $w; $self->_read_copydata };
 }
 
+=item stop
+
+Stop receiving replication payloads and disconnect from the PostgreSQL server.
+
+=back
+
+=cut
+
 sub stop {
     my $self = shift;
 
@@ -326,5 +631,20 @@ sub _async_await {
 
     return $d->promise;
 }
+
+=head1 AUTHOR
+
+William Cox (cpan:MYDMNSN) <mydimension@gmail.com>
+
+=head1 COPYRIGHT
+
+Copyright (c) 2017-2018 William Cox
+
+=head1 LICENSE
+
+This library is free software and may be distributed under the same terms as perl itself.
+See L<http://dev.perl.org/licenses/>.
+
+=cut
 
 1;
