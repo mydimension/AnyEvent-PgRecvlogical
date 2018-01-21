@@ -11,6 +11,7 @@ AnyEvent::PgRecvlogical - perl port of pg_recvlogical
 =for html
 <a href="https://travis-ci.org/mydimension/AnyEvent-PgRecvlogical"><img src="https://travis-ci.org/mydimension/AnyEvent-PgRecvlogical.svg?branch=master" /></a>
 <a href='https://coveralls.io/github/mydimension/AnyEvent-PgRecvlogical?branch=master'><img src='https://coveralls.io/repos/github/mydimension/AnyEvent-PgRecvlogical/badge.svg?branch=master' alt='Coverage Status' /></a>
+<a href="https://badge.fury.io/pl/AnyEvent-PgRecvlogical"><img src="https://badge.fury.io/pl/AnyEvent-PgRecvlogical@2x.png" alt="CPAN version" height="18"></a>
 
 =head1 SYNOPSIS
 
