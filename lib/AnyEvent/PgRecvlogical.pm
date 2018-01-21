@@ -225,6 +225,8 @@ sub _read_copydata {
         # server keepalive
         my (undef, $lsnpos, $ts, $reply) = unpack PRIMARY_HEARTBEAT, $msg;
 
+        $self->_set_received_lsn($lsnpos) if $lsnpos > $self->received_lsn;
+
         # only interested in the request-reply bit
         # uncoverable branch true
         if ($reply) {
@@ -246,7 +248,7 @@ sub _read_copydata {
 
     my (undef, $startlsn, $endlsn, $ts, $record) = unpack XLOGDATA, $msg;
 
-    $self->_set_received_lsn($startlsn);
+    $self->_set_received_lsn($startlsn) if $startlsn > $self->received_lsn;
 
     my $guard = guard {
         $self->_set_flushed_lsn($startlsn) if $startlsn > $self->flushed_lsn;
