@@ -521,6 +521,9 @@ sub _read_copydata {
         $self->on_error->('could not read COPY data: ' . $self->dbh->errstr);
     }
 
+    # do it again until $n == 0
+    my $w; $w = AE::timer 0, 0, sub { undef $w; $self->_read_copydata };
+
     my $type = substr $msg, 0, 1;
 
     if ('k' eq $type) {
@@ -545,7 +548,9 @@ sub _read_copydata {
     # uncoverable branch true
     unless ('w' eq $type) {
         # uncoverable statement
+        undef $w;
         $self->on_error->("unrecognized streaming header: '$type'");
+        return;
     }
 
     my (undef, $startlsn, $endlsn, $ts, $record) = unpack XLOGDATA, $msg;
@@ -558,8 +563,7 @@ sub _read_copydata {
 
     $self->on_message->($record, $guard);
 
-    # do it again until $n == 0
-    my $w; $w = AE::timer 0, 0, sub { undef $w; $self->_read_copydata };
+    return;
 }
 
 =item stop
