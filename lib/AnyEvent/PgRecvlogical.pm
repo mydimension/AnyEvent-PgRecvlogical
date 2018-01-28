@@ -45,7 +45,7 @@ use DBI;
 use DBD::Pg 3.7.0 ':async';
 use AnyEvent;
 use AnyEvent::Util 'guard';
-use Promises backend => ['AnyEvent'], qw(deferred);
+use Promises 0.99 backend => ['AnyEvent'], qw(deferred);
 use Types::Standard ':all';
 use Try::Tiny;
 use Carp 'croak';
