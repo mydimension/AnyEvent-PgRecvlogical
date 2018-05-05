@@ -311,8 +311,9 @@ has flushed_lsn  => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_
 has on_message => (is => 'ro', isa => CodeRef, required => 1);
 has on_error => (is => 'ro', isa => CodeRef, default => sub { \&croak });
 
-has _fh_watch => (is => 'lazy', isa => Ref, clearer => 1);
-has _timer    => (is => 'lazy', isa => Ref, clearer => 1);
+has _fh_watch => (is => 'lazy', isa => Ref,  clearer => 1);
+has _timer    => (is => 'lazy', isa => Ref,  clearer => 1);
+has _paused   => (is => 'rw',   isa => Bool, default => 0);
 
 =head1 CONSTRUCTOR
 
@@ -489,8 +490,20 @@ sub start_replication {
     );
 }
 
+sub pause { shift->_paused(1) }
+
+sub unpause {
+    my $self = shift;
+
+    $self->_paused(0);
+
+    AE::postpone { $self->_read_copydata };
+}
+
 sub _read_copydata {
     my $self = shift;
+
+    return if $self->_paused;
 
     my ($n, $msg);
     my $ok = try {
