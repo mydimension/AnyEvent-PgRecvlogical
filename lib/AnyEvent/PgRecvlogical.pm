@@ -49,6 +49,7 @@ use Promises 0.99 backend => ['AnyEvent'], qw(deferred);
 use Types::Standard ':all';
 use Try::Tiny;
 use Carp 'croak';
+use curry;
 
 use constant {
     AWAIT_INTERVAL    => 1,
@@ -353,12 +354,12 @@ sub _build_dbh {
 
 sub _build__fh_watch {
     my $self = shift;
-    return AE::io $self->dbh->{pg_socket}, 0, sub { $self->_read_copydata };
+    return AE::io $self->dbh->{pg_socket}, 0, $self->curry::weak::_read_copydata;
 }
 
 sub _build__timer {
     my $self = shift;
-    return AE::timer $self->heartbeat, $self->heartbeat, sub { $self->_heartbeat };
+    return AE::timer $self->heartbeat, $self->heartbeat, $self->curry::weak::_heartbeat;
 }
 
 =head1 METHODS
@@ -396,7 +397,7 @@ sub start {
 
     $self->_post_init(
         deferred {
-            shift->chain(sub { $self->identify_system }, sub { $self->create_slot }, sub { $self->start_replication });
+            shift->chain($self->curry::identify_system, $self->curry::create_slot, $self->curry::start_replication);
         }
     );
 }
@@ -570,11 +571,14 @@ sub _read_copydata {
 
     $self->_set_received_lsn($startlsn) if $startlsn > $self->received_lsn;
 
-    my $guard = guard {
-        $self->_set_flushed_lsn($startlsn) if $startlsn > $self->flushed_lsn;
-    };
+    my $guard = $self->$curry::weak(
+        sub {
+            my $self = shift;
+            $self->_set_flushed_lsn($startlsn) if $startlsn > $self->flushed_lsn;
+        }
+    );
 
-    $self->on_message->($record, $guard);
+    $self->on_message->($record, guard(\&$guard));
 
     return;
 }
