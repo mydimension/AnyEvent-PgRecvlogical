@@ -312,9 +312,8 @@ has flushed_lsn  => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_
 has on_message => (is => 'ro', isa => CodeRef, required => 1);
 has on_error => (is => 'ro', isa => CodeRef, default => sub { \&croak });
 
-has _fh_watch => (is => 'lazy', isa => Ref,  clearer => 1);
+has _fh_watch => (is => 'lazy', isa => Ref,  clearer => 1, predicate => 1);
 has _timer    => (is => 'lazy', isa => Ref,  clearer => 1);
-has _paused   => (is => 'rw',   isa => Bool, default => 0);
 
 =head1 CONSTRUCTOR
 
@@ -491,20 +490,36 @@ sub start_replication {
     );
 }
 
-sub pause { shift->_paused(1) }
+=item pause
 
-sub unpause {
-    my $self = shift;
+Pauses reading from the database. Useful for throttling the inbound flow of data so as to not overwhelm your
+application. It is safe, albeit redundant, to call this method multiple time in a row without unpausing.
 
-    $self->_paused(0);
+=cut
 
-    AE::postpone { $self->_read_copydata };
-}
+sub pause { shift->_clear_fh_watch; return; }
+
+=item unpause
+
+Resume reading from the database. After a successful L</pause>, this will pick right back reciving data and sending it
+to the provided L</callback>. It is safe, albeit redundant, to call this method multiple time in a row without pausing.
+
+=cut
+
+sub unpause { shift->_fh_watch; return; }
+
+=item is_paused
+
+Returns the current pause state.
+
+Returns: boolean
+
+=cut
+
+sub is_paused { return !shift->_has_fh_watch }
 
 sub _read_copydata {
     my $self = shift;
-
-    return if $self->_paused;
 
     my ($n, $msg);
     my $ok = try {

@@ -83,6 +83,8 @@ ae_sleep(3);
 
 $recv->pause;
 
+ok $recv->is_paused, 'sucessfully paused';
+
 $control->do('insert into test_tbl (id, payload) values (?, ?)', undef, 3, 'frobnicate');
 
 ae_sleep(1);
@@ -94,6 +96,8 @@ push @expected, (
 );
 
 $recv->unpause;
+
+ok !$recv->is_paused, 'sucessfully unpaused';
 
 ae_sleep(2);
 
