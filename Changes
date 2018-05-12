@@ -1,6 +1,7 @@
 Revision history for {{$dist->name}}
 
 {{$NEXT}}
+    - add pause/unpause methods to provide so flow control to end users
 
 0.004     2018-01-28 18:49:54-05:00 America/New_York
     - explicit dependency on Promises 0.99; <= 0.94 won't work
