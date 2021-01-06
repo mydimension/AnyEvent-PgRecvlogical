@@ -142,7 +142,6 @@ try {
     $error = $_;
 };
 
-diag "Error: $error";
 ok !!$error, 'start died on connect error';
 
 done_testing;
