@@ -343,12 +343,16 @@ sub _dsn {
 
 sub _build_dbh {
     my $self = shift;
-    return DBI->connect(
+    my $dbh = DBI->connect(
         $self->_dsn,
         $self->username,
         $self->password,
         { PrintError => 0 },
     );
+
+    croak $DBI::errstr unless $dbh;
+
+    return $dbh;
 }
 
 sub _build__fh_watch {
@@ -430,7 +434,14 @@ Returns: L<Promises::Promise>
 sub identify_system {
     my $self = shift;
     $self->dbh->do('IDENTIFY_SYSTEM', { pg_async => PG_ASYNC });
-    return _async_await($self->dbh);
+    return _async_await($self->dbh)->catch(
+        sub {
+            my @error = @_;
+            unshift @error, $DBI::errstr if $DBI::errstr;
+
+            croak @error;
+        }
+    );
 }
 
 =item create_slot
