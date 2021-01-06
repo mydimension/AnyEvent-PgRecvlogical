@@ -358,7 +358,13 @@ sub _build__fh_watch {
 
 sub _build__timer {
     my $self = shift;
-    return AE::timer $self->heartbeat, $self->heartbeat, $self->curry::weak::_heartbeat;
+    if ($AnyEvent::MODEL and $AnyEvent::MODEL eq 'AnyEvent::Impl::EV') {
+        my $w = EV::periodic(0, $self->heartbeat, 0, $self->curry::weak::_heartbeat);
+        $w->priority(&EV::MAXPRI);
+        return $w;
+    } else {
+        return AE::timer $self->heartbeat, $self->heartbeat, $self->curry::weak::_heartbeat;
+    }
 }
 
 =head1 METHODS
