@@ -567,8 +567,10 @@ sub _read_copydata {
         $self->on_error->('could not read COPY data: ' . $self->dbh->errstr);
     }
 
+    my $wakeup = $self->is_paused ? 0.05 : 0;
+
     # do it again until $n == 0
-    my $w; $w = AE::timer 0, 0, sub { undef $w; $self->_read_copydata };
+    my $w; $w = AE::timer $wakeup, 0, sub { undef $w; $self->_read_copydata };
 
     my $type = substr $msg, 0, 1;
 
