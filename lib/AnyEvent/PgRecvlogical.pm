@@ -72,10 +72,11 @@ my $DBH = (InstanceOf ['DBI::db'])->create_child_type(
           and $_->{Name} =~ /replication=/;
     },
     message => sub {
-        my $parent_check = (InstanceOf['DBI::db'])->validate($_);
+        my $parent_check = (InstanceOf ['DBI::db'])->validate($_);
         return $parent_check if $parent_check;
         return "$_ is not a DBD::Pg handle" unless $_->{Driver}->{Name} eq 'Pg';
-        return "$_ is connected to an old postgres version ($_->{pg_server_version} < 9.4.0)" unless $_->{pg_server_version} >= PG_MIN_VERSION;
+        return "$_ is connected to an old postgres version ($_->{pg_server_version} < 9.4.0)"
+          unless $_->{pg_server_version} >= PG_MIN_VERSION;
         return "$_ is not a replication connection: $_->{Name}" unless $_->{Name} =~ /replication=/;
     }
 );
@@ -291,29 +292,29 @@ the payload. Once it is released, the server will be informed that the WAL posit
 has dbname   => (is => 'ro', isa => Str, required  => 1);
 has host     => (is => 'ro', isa => Str, predicate => 1);
 has port     => (is => 'ro', isa => Int, predicate => 1);
-has username => (is => 'ro', isa => Str, default => q{});
-has password => (is => 'ro', isa => Str, default => q{});
+has username => (is => 'ro', isa => Str, default   => q{});
+has password => (is => 'ro', isa => Str, default   => q{});
 has slot     => (is => 'ro', isa => Str, required  => 1);
 
-has dbh => (is => 'lazy', isa => $DBH, clearer => 1, init_arg => undef);
-has do_create_slot     => (is => 'ro', isa => Bool, default   => 0);
-has slot_exists_ok     => (is => 'ro', isa => Bool, default   => 0);
-has reconnect          => (is => 'ro', isa => Bool, default   => 1);
-has reconnect_delay    => (is => 'ro', isa => Int,  default   => 5);
-has reconnect_limit    => (is => 'ro', isa => Int,  predicate => 1);
-has _reconnect_counter => (is => 'rw', isa => Int,  default   => 0);
-has heartbeat          => (is => 'ro', isa => Int,  default   => 10);
-has plugin             => (is => 'ro', isa => Str,  default   => 'test_decoding');
-has options => (is => 'ro', isa => HashRef, default => sub { {} });
-has startpos     => (is => 'rwp', isa => $LSN, default => 0, coerce  => 1);
-has received_lsn => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef, lazy => 1);
-has flushed_lsn  => (is => 'rwp', isa => $LSN, default => 0, clearer => 1, init_arg => undef, lazy => 1);
+has dbh                => (is => 'lazy', isa => $DBH, clearer => 1, init_arg => undef);
+has do_create_slot     => (is => 'ro',   isa => Bool,    default   => 0);
+has slot_exists_ok     => (is => 'ro',   isa => Bool,    default   => 0);
+has reconnect          => (is => 'ro',   isa => Bool,    default   => 1);
+has reconnect_delay    => (is => 'ro',   isa => Int,     default   => 5);
+has reconnect_limit    => (is => 'ro',   isa => Int,     predicate => 1);
+has _reconnect_counter => (is => 'rw',   isa => Int,     default   => 0);
+has heartbeat          => (is => 'ro',   isa => Int,     default   => 10);
+has plugin             => (is => 'ro',   isa => Str,     default   => 'test_decoding');
+has options            => (is => 'ro',   isa => HashRef, default   => sub { {} });
+has startpos           => (is => 'rwp',  isa => $LSN, default => 0, coerce  => 1);
+has received_lsn       => (is => 'rwp',  isa => $LSN, default => 0, clearer => 1, init_arg => undef, lazy => 1);
+has flushed_lsn        => (is => 'rwp',  isa => $LSN, default => 0, clearer => 1, init_arg => undef, lazy => 1);
 
 has on_message => (is => 'ro', isa => CodeRef, required => 1);
-has on_error => (is => 'ro', isa => CodeRef, default => sub { \&croak });
+has on_error   => (is => 'ro', isa => CodeRef, default  => sub { \&croak });
 
-has _fh_watch => (is => 'lazy', isa => Ref,  clearer => 1, predicate => 1);
-has _timer    => (is => 'lazy', isa => Ref,  clearer => 1);
+has _fh_watch => (is => 'lazy', isa => Ref, clearer => 1, predicate => 1);
+has _timer => (is => 'lazy', isa => Ref, clearer => 1);
 
 =head1 CONSTRUCTOR
 
@@ -343,12 +344,7 @@ sub _dsn {
 
 sub _build_dbh {
     my $self = shift;
-    my $dbh = DBI->connect(
-        $self->_dsn,
-        $self->username,
-        $self->password,
-        { PrintError => 0 },
-    );
+    my $dbh  = DBI->connect($self->_dsn, $self->username, $self->password, { PrintError => 0 },);
 
     croak $DBI::errstr unless $dbh;
 
@@ -484,7 +480,7 @@ sub _option_string {
         defined $v and $opts[-1] .= sprintf ' %s', $self->dbh->quote($v);    # uncoverable branch false
     }
 
-    return @opts ? sprintf('(%s)', join q{, }, @opts) : q{};    # uncoverable branch false
+    return @opts ? sprintf('(%s)', join q{, }, @opts) : q{};                 # uncoverable branch false
 }
 
 =item start_replication
@@ -503,7 +499,7 @@ sub start_replication {
             $self->dbh->quote_identifier($self->slot),
             $LSNStr->coerce($self->startpos),
             $self->_option_string
-        ),
+        )
     );
 }
 
@@ -542,8 +538,7 @@ sub _read_copydata {
     my $ok = try {
         $n = $self->dbh->pg_getcopydata_async($msg);
         1;
-    }
-    catch {
+    } catch {
         # uncoverable statement count:2
         AE::postpone { $self->_handle_disconnect };
         0;
@@ -682,8 +677,7 @@ sub _async_await {
         return unless $dbh->pg_ready;
         try {
             $d->resolve($dbh->pg_result);
-        }
-        catch {
+        } catch {
             $d->reject($_);
         };
         undef $w;
