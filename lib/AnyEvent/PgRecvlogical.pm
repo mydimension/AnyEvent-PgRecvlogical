@@ -353,7 +353,13 @@ sub _build_dbh {
 
 sub _build__fh_watch {
     my $self = shift;
-    return AE::io $self->dbh->{pg_socket}, 0, $self->curry::weak::_read_copydata;
+
+    my $w = AE::io $self->dbh->{pg_socket}, 0, $self->curry::weak::_read_copydata;
+    if ($AnyEvent::MODEL and $AnyEvent::MODEL eq 'AnyEvent::Impl::EV') {
+        $w->priority($w->priority - 1);    # be a little less aggressive
+    }
+
+    return $w;
 }
 
 sub _build__timer {
@@ -548,6 +554,7 @@ sub _read_copydata {
     return unless $ok;    # uncoverable branch true
 
     # nothing waiting
+    # watcher will re-enter until $n == 0
     return if $n == 0;
 
     if ($n == -1) {
@@ -561,11 +568,6 @@ sub _read_copydata {
         # uncoverable statement
         $self->on_error->('could not read COPY data: ' . $self->dbh->errstr);
     }
-
-    my $wakeup = $self->is_paused ? 0.05 : 0;
-
-    # do it again until $n == 0
-    my $w; $w = AE::timer $wakeup, 0, sub { undef $w; $self->_read_copydata };
 
     my $type = substr $msg, 0, 1;
 
@@ -591,7 +593,6 @@ sub _read_copydata {
     # uncoverable branch true
     unless ('w' eq $type) {
         # uncoverable statement
-        undef $w;
         $self->on_error->("unrecognized streaming header: '$type'");
         return;
     }
