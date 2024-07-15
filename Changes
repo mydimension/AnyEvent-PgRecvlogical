@@ -1,6 +1,8 @@
 Revision history for {{$dist->name}}
 
 {{$NEXT}}
+    - remote time-watcher loop and rely only on io watcher
+    - improve test suite performance
 
 1.03      2024-06-01 12:10:02-04:00 America/New_York
     - throttle read loop when consumer has requested a pause
