@@ -1,6 +1,8 @@
 Revision history for {{$dist->name}}
 
 {{$NEXT}}
+
+1.04      2024-07-15 14:32:57-04:00 America/New_York
     - remote time-watcher loop and rely only on io watcher
     - improve test suite performance
 
